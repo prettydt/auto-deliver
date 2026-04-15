@@ -64,14 +64,14 @@ def read_latest_sms_code(keyword="小红书", sent_after: float = 0.0) -> Option
     sent_after: Unix 时间戳（秒），只返回该时间点之后收到的短信
     """
     db_path = os.path.expanduser("~/Library/Messages/chat.db")
-    # 转换为 Apple epoch（chat.db 使用 Apple epoch）
-    apple_after = sent_after - _APPLE_EPOCH_OFFSET if sent_after > 0 else 0
+    # chat.db 的 date 字段是 Apple epoch 纳秒（从 2001-01-01 起的纳秒数）
+    apple_after_ns = int((sent_after - _APPLE_EPOCH_OFFSET) * 1_000_000_000) if sent_after > 0 else 0
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         cur.execute(
             "SELECT text FROM message WHERE text LIKE ? AND date > ? ORDER BY date DESC LIMIT 5",
-            (f"%{keyword}%验证码%", apple_after)
+            (f"%{keyword}%验证码%", apple_after_ns)
         )
         rows = cur.fetchall()
         conn.close()
