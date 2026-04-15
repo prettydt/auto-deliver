@@ -317,6 +317,164 @@ def xhs_publish(title: str, content: str, image_path: str) -> bool:
 
 
 # ──────────────────────────────────────────────
+# 平台: 知乎 (Zhihu)
+# ──────────────────────────────────────────────
+
+def zhihu_login(phone: str) -> bool:
+    """登录知乎（如已登录则跳过）"""
+    url = safari_url()
+    if "zhihu.com" in url and "signin" not in url and "login" not in url:
+        print("  [跳过] 知乎已登录")
+        return True
+
+    print("  [1/4] 导航到知乎登录页...")
+    safari_navigate("https://www.zhihu.com/signin")
+    time.sleep(2)
+
+    # 确保在"验证码登录" tab
+    safari_js("""
+        var tab = Array.from(document.querySelectorAll('*')).find(
+            el => el.children.length===0 && el.innerText && el.innerText.trim()==='验证码登录'
+        );
+        tab && tab.click();
+    """)
+    time.sleep(0.5)
+
+    print(f"  [2/4] 填手机号 {phone}...")
+    safari_js(f"""
+        var input = document.querySelector('input[placeholder="手机号"]');
+        if(input) {{
+            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'{phone}');
+            input.dispatchEvent(new Event('input',{{bubbles:true}}));
+        }}
+    """)
+    time.sleep(0.5)
+
+    print("  [3/4] 发送验证码...")
+    send_time = time.time()
+    safari_js("""
+        var btn = Array.from(document.querySelectorAll('button')).find(
+            b => b.innerText && b.innerText.trim()==='获取短信验证码'
+        );
+        btn && btn.click();
+    """)
+    time.sleep(1.5)
+
+    # 检测图形验证码弹窗
+    captcha_detected = safari_js("""
+        var dialog = document.querySelector('[class*="Modal"], [class*="modal"], [class*="captcha"], [class*="Captcha"]');
+        var txt = document.body.innerText || '';
+        (txt.includes('请依次点击') || txt.includes('安全验证') || txt.includes('请完成')) ? 'yes' : 'no';
+    """)
+    if captcha_detected == "yes":
+        print()
+        print("  ⚠️  检测到图形验证码！")
+        print("  ──────────────────────────────────────────")
+        print("  请在 Safari 中手动完成图片验证（点击指定图标）")
+        print("  完成后，验证码短信会自动发送")
+        print("  完成后按 Enter 继续...")
+        print("  ──────────────────────────────────────────")
+        input()
+        send_time = time.time()  # 重置发送时间，此时短信刚发出
+        time.sleep(1)
+
+    print("  [3/4] 等待短信...")
+    code = None
+    for attempt in range(12):
+        time.sleep(5)
+        code = read_latest_sms_code("知乎", sent_after=send_time)
+        if code:
+            print(f"  [3/4] 收到验证码: {code}")
+            break
+        print(f"  [3/4] 等待中... ({(attempt+1)*5}s)")
+
+    if not code:
+        print("  [错误] 未收到验证码")
+        return False
+
+    print("  [4/4] 填验证码并登录...")
+    safari_js(f"""
+        var input = document.querySelector('input[placeholder="输入 6 位短信验证码"]');
+        if(input) {{
+            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'{code}');
+            input.dispatchEvent(new Event('input',{{bubbles:true}}));
+            input.dispatchEvent(new Event('change',{{bubbles:true}}));
+        }}
+    """)
+    time.sleep(0.5)
+    safari_js("""
+        var btn = Array.from(document.querySelectorAll('button')).find(
+            b => b.innerText && b.innerText.includes('登录')
+        );
+        btn && btn.click();
+    """)
+    time.sleep(4)
+
+    url = safari_url()
+    if "signin" in url or "login" in url:
+        print("  [错误] 登录失败，仍在登录页")
+        return False
+    print(f"  [OK] 登录成功: {url}")
+    return True
+
+
+def zhihu_publish(title: str, content: str, image_path: str = "") -> bool:
+    """发布知乎文章"""
+    print("  [1/3] 进入创作中心...")
+    safari_navigate("https://zhuanlan.zhihu.com/write")
+    time.sleep(3)
+
+    print("  [2/3] 填写标题和内容...")
+    safe_title = title.replace("'", "\\'").replace('"', '\\"')
+    # 知乎标题是 textarea
+    safari_js(f"""
+        var ta = document.querySelector('textarea[placeholder*="标题"]');
+        if(ta) {{
+            Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(ta,'{safe_title}');
+            ta.dispatchEvent(new Event('input',{{bubbles:true}}));
+            ta.dispatchEvent(new Event('change',{{bubbles:true}}));
+        }}
+    """)
+    time.sleep(0.3)
+
+    # 知乎正文是 Draft.js，需通过 ClipboardEvent 粘贴（execCommand/innerHTML 不触发 Draft.js 状态）
+    safe_content = content.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+    safari_js(f"""
+        var ed = document.querySelector('[contenteditable=true]');
+        if(ed) {{
+            ed.focus();
+            var dt = new DataTransfer();
+            dt.setData('text/plain', '{safe_content}');
+            ed.dispatchEvent(new ClipboardEvent('paste', {{bubbles:true, cancelable:true, clipboardData:dt}}));
+        }}
+    """)
+    time.sleep(0.5)
+
+    print("  [3/3] 点击发布...")
+    safari_js("""
+        var btn = Array.from(document.querySelectorAll('button')).find(
+            b => b.innerText && b.innerText.trim()==='发布'
+        );
+        btn && btn.click();
+    """)
+
+    # 等待发布完成（最多30秒，URL 会去掉 /edit）
+    for _ in range(6):
+        time.sleep(5)
+        url = safari_url()
+        if "/edit" not in url and "zhuanlan.zhihu.com/p/" in url:
+            print(f"  [OK] 发布成功: {url}")
+            return True
+
+    url = safari_url()
+    if "/edit" not in url and "zhuanlan.zhihu.com/p/" in url:
+        print(f"  [OK] 发布成功: {url}")
+        return True
+    print(f"  [警告] 未检测到发布成功，当前 URL: {url}")
+    return False
+
+
+# ──────────────────────────────────────────────
 # 平台路由（后续在此添加新平台）
 # ──────────────────────────────────────────────
 
@@ -325,6 +483,11 @@ PLATFORMS = {
         "name": "小红书",
         "login": xhs_login,
         "publish": xhs_publish,
+    },
+    "zhihu": {
+        "name": "知乎",
+        "login": zhihu_login,
+        "publish": zhihu_publish,
     },
     # 未来可扩展:
     # "weibo": { "name": "微博", "login": weibo_login, "publish": weibo_publish },
