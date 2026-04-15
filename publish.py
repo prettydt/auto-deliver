@@ -67,8 +67,8 @@ def read_latest_sms_code(keyword="小红书") -> Optional[str]:
         rows = cur.fetchall()
         conn.close()
         for row in rows:
-            text = row[0] or ""
-            match = re.search(r'验证码[是：:]\s*(\d{4,8})', text)
+            text = (row[0] or "").replace('\n', ' ').replace('\r', ' ')
+            match = re.search(r'验证码[是：:\s]+(\d{4,8})', text)
             if match:
                 return match.group(1)
     except Exception as e:
