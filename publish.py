@@ -54,15 +54,24 @@ def safari_navigate(url: str) -> None:
     time.sleep(3)
 
 
-def read_latest_sms_code(keyword="小红书") -> Optional[str]:
-    """从 macOS Messages DB 读取最新验证码"""
+# Apple epoch 偏移量：Apple 时间戳从 2001-01-01 开始，Unix 从 1970-01-01 开始
+_APPLE_EPOCH_OFFSET = 978307200
+
+
+def read_latest_sms_code(keyword="小红书", sent_after: float = 0.0) -> Optional[str]:
+    """从 macOS Messages DB 读取最新验证码
+    
+    sent_after: Unix 时间戳（秒），只返回该时间点之后收到的短信
+    """
     db_path = os.path.expanduser("~/Library/Messages/chat.db")
+    # 转换为 Apple epoch（chat.db 使用 Apple epoch）
+    apple_after = sent_after - _APPLE_EPOCH_OFFSET if sent_after > 0 else 0
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         cur.execute(
-            "SELECT text FROM message WHERE text LIKE ? ORDER BY date DESC LIMIT 5",
-            (f"%{keyword}%验证码%",)
+            "SELECT text FROM message WHERE text LIKE ? AND date > ? ORDER BY date DESC LIMIT 5",
+            (f"%{keyword}%验证码%", apple_after)
         )
         rows = cur.fetchall()
         conn.close()
@@ -188,6 +197,7 @@ def xhs_login(phone: str) -> bool:
     time.sleep(0.5)
 
     print("  [3/4] 发送验证码...")
+    send_time = time.time()  # 记录发送时间，之后只读这之后收到的短信
     safari_js("""
         var btn = Array.from(document.querySelectorAll('*')).find(
             el => el.children.length===0 && el.innerText && el.innerText.trim()==='发送验证码'
@@ -199,7 +209,7 @@ def xhs_login(phone: str) -> bool:
     code = None
     for attempt in range(12):  # 最多等60秒
         time.sleep(5)
-        code = read_latest_sms_code("小红书")
+        code = read_latest_sms_code("小红书", sent_after=send_time)
         if code:
             print(f"  [3/4] 收到验证码: {code}")
             break
